@@ -1,0 +1,22 @@
+{
+  "name": "otg-data-rescue",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only OTG USB flash-drive recovery prototype built with Capacitor 7.",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "dev": "vite",
+    "android": "npx cap open android",
+    "sync": "npm run build && npx cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
