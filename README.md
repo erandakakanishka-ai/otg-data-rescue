@@ -27,7 +27,7 @@ An **experimental, read-only Android recovery prototype** for USB flash drives c
 
 ## Development
 
-Capacitor 7 requires a current Node.js release. Android builds use JDK 17.
+Capacitor 7 requires a current Node.js release. Current Capacitor Android builds use JDK 21.
 
 ```bash
 npm ci
