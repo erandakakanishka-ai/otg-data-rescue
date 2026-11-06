@@ -116,8 +116,31 @@ class FileCarver(private val outputDirectory: File, private val onFile: (CarvedF
             current.file.delete()
             return
         }
+        var outputFile = current.file
+        var outputKind = current.signature.kind
+        var isComplete = complete
+        if (outputKind == "zip") {
+            try {
+                java.util.zip.ZipFile(outputFile).use { archive ->
+                    val names = archive.entries().toList().map { it.name }
+                    val extension = when {
+                        "word/document.xml" in names -> "docx"
+                        "xl/workbook.xml" in names -> "xlsx"
+                        "ppt/presentation.xml" in names -> "pptx"
+                        else -> "zip"
+                    }
+                    if (extension != "zip") {
+                        val renamed = File(outputFile.parentFile, outputFile.nameWithoutExtension + "." + extension)
+                        if (outputFile.renameTo(renamed)) outputFile = renamed
+                        outputKind = extension
+                    }
+                }
+            } catch (_: Exception) {
+                isComplete = false // A ZIP footer alone is not proof of a valid archive.
+            }
+        }
         filesFound++
-        onFile(CarvedFile(current.file.name, current.file.absolutePath, current.size, current.signature.kind, complete))
+        onFile(CarvedFile(outputFile.name, outputFile.absolutePath, outputFile.length(), outputKind, isComplete))
     }
 
     private fun indexOf(haystack: ByteArray, needle: ByteArray, start: Int): Int {

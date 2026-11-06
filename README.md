@@ -14,6 +14,8 @@ An **experimental, read-only Android recovery prototype** for USB flash drives c
 - Supports verified resume after a normal cancellation by checking source identity, capacity, image length, and the partial image checksum.
 - Recovers from either an existing image or a directly connected source drive.
 - Carves common contiguous JPG, PNG, GIF, PDF, and ZIP-based files.
+- Validates archives and identifies DOCX, XLSX, and PPTX documents where possible.
+- Exports recovered files to a user-selected folder with size verification.
 - Saves recovered output to app-private storage, never to the source drive.
 - Builds a debug APK through GitHub Actions.
 
@@ -22,7 +24,7 @@ An **experimental, read-only Android recovery prototype** for USB flash drives c
 - This is an early engineering prototype, not a validated forensic product.
 - File carving often loses original names and folder structures.
 - Fragmented files, encrypted volumes, unsupported filesystems, and unusual USB bridges can fail.
-- MP4 and ZIP recovery needs additional structural validation before production use.
+- Video recovery and fragmented-file reconstruction are not implemented yet.
 - Use only on drives you own or have permission to examine.
 
 ## Development

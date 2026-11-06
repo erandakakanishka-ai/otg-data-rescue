@@ -48,7 +48,7 @@ app.innerHTML = `
 
     <section class="card">
       <div class="step-title"><span>3</span><h2>Scan for deleted files</h2></div>
-      <p class="muted">Choose an image above for the safest workflow, or directly scan the connected drive. Signatures currently targeted: JPG, PNG, GIF, PDF and ZIP-based files.</p>
+      <p class="muted">Choose an image above for the safest workflow, or directly scan the connected drive. Signatures currently targeted: JPG, PNG, GIF, PDF and validated ZIP/DOCX/XLSX/PPTX files.</p>
       <div class="actions">
         <button id="scan" disabled>Direct scan</button>
         <button id="stop" class="danger" disabled>Stop operation</button>
@@ -60,6 +60,8 @@ app.innerHTML = `
     <section class="card results-card">
       <div class="step-title"><span>4</span><h2>Recovered files</h2><b id="count">0</b></div>
       <div id="results" class="results"><p class="empty">Recovered files will appear here.</p></div>
+      <div class="actions"><button id="export" disabled>Export recovered files</button></div>
+      <p id="export-status" class="status">Export copies files to a folder you choose.</p>
       <p id="output-path" class="output-path"></p>
     </section>
 
@@ -77,6 +79,7 @@ const imageButton = $<HTMLButtonElement>('image');
 const resumeImageButton = $<HTMLButtonElement>('resume-image');
 const scanImageButton = $<HTMLButtonElement>('scan-image');
 const stopButton = $<HTMLButtonElement>('stop');
+const exportButton = $<HTMLButtonElement>('export');
 let drives: UsbDrive[] = [];
 let connectedId: number | null = null;
 let files: RecoveredFile[] = [];
@@ -89,6 +92,7 @@ function setStatus(message: string, error = false) {
 function addFile(file: RecoveredFile) {
   files.push(file);
   $('count').textContent = String(files.length);
+  exportButton.disabled = false;
   if (files.length === 1) $('results').innerHTML = '';
   const row = document.createElement('div');
   row.className = 'file-row';
@@ -146,6 +150,7 @@ imageButton.addEventListener('click', async () => {
   if (connectedId === null) return;
   try {
     imageButton.disabled = true;
+    resumeImageButton.disabled = true;
     scanImageButton.disabled = true;
     scanButton.disabled = true;
     stopButton.disabled = false;
@@ -154,6 +159,7 @@ imageButton.addEventListener('click', async () => {
   } catch (error) {
     $('image-label').textContent = error instanceof Error ? error.message : String(error);
     imageButton.disabled = false;
+    resumeImageButton.disabled = false;
     scanImageButton.disabled = false;
     scanButton.disabled = false;
     stopButton.disabled = true;
@@ -186,6 +192,7 @@ scanImageButton.addEventListener('click', async () => {
     $('results').innerHTML = '<p class="empty">Select a raw .img file to scan…</p>';
     $('count').textContent = '0';
     imageButton.disabled = true;
+    resumeImageButton.disabled = true;
     scanImageButton.disabled = true;
     scanButton.disabled = true;
     stopButton.disabled = false;
@@ -193,6 +200,7 @@ scanImageButton.addEventListener('click', async () => {
   } catch (error) {
     $('progress-label').textContent = error instanceof Error ? error.message : String(error);
     imageButton.disabled = connectedId === null;
+    resumeImageButton.disabled = connectedId === null;
     scanImageButton.disabled = false;
     scanButton.disabled = connectedId === null;
     stopButton.disabled = true;
@@ -205,6 +213,9 @@ scanButton.addEventListener('click', async () => {
   $('results').innerHTML = '<p class="empty">Scanning… found files will appear here.</p>';
   $('count').textContent = '0';
   scanButton.disabled = true;
+  imageButton.disabled = true;
+  resumeImageButton.disabled = true;
+  scanImageButton.disabled = true;
   connectButton.disabled = true;
   stopButton.disabled = false;
   try {
@@ -212,8 +223,22 @@ scanButton.addEventListener('click', async () => {
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), true);
     scanButton.disabled = false;
+    imageButton.disabled = false;
+    resumeImageButton.disabled = false;
+    scanImageButton.disabled = false;
     connectButton.disabled = false;
     stopButton.disabled = true;
+  }
+});
+
+exportButton.addEventListener('click', async () => {
+  try {
+    exportButton.disabled = true;
+    $('export-status').textContent = 'Choose an export folder…';
+    await OtgRecovery.exportRecoveredFiles();
+  } catch (error) {
+    $('export-status').textContent = error instanceof Error ? error.message : String(error);
+    exportButton.disabled = false;
   }
 });
 
@@ -245,10 +270,16 @@ OtgRecovery.addListener('imageComplete', (result) => {
   $('image-hash').textContent = result.sha256 ? `SHA-256: ${result.sha256}` : 'The image is incomplete; do not treat it as a verified acquisition.';
 });
 
+OtgRecovery.addListener('exportComplete', (result) => {
+  exportButton.disabled = false;
+  $('export-status').textContent = result.message;
+});
+
 OtgRecovery.addListener('fileRecovered', addFile);
 OtgRecovery.addListener('scanComplete', (result) => {
   scanButton.disabled = connectedId === null;
   imageButton.disabled = connectedId === null;
+  resumeImageButton.disabled = connectedId === null;
   scanImageButton.disabled = false;
   connectButton.disabled = false;
   stopButton.disabled = true;
@@ -264,4 +295,14 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`;
 }
 
+async function loadRecoveredFiles() {
+  try {
+    const saved = await OtgRecovery.listRecoveredFiles();
+    saved.files.sort((a, b) => a.name.localeCompare(b.name)).forEach(addFile);
+  } catch {
+    // Native file history is unavailable in the browser preview.
+  }
+}
+
 detectDrives();
+loadRecoveredFiles();

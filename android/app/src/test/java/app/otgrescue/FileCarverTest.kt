@@ -36,7 +36,31 @@ class FileCarverTest {
         zip.toList().chunked(7).forEach { carver.consume(it.toByteArray()) }
         carver.finish()
         assertEquals(1, results.size)
+        assertEquals(false, results.single().complete)
         assertArrayEquals(zip, File(results.single().path).readBytes())
+    }
+
+    @Test
+    fun identifiesValidDocxArchive() {
+        val output = temporaryFolder.newFolder("docx-output")
+        val results = mutableListOf<CarvedFile>()
+        val carver = FileCarver(output) { results.add(it) }
+        val bytes = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(bytes).use { zip ->
+            zip.putNextEntry(java.util.zip.ZipEntry("[Content_Types].xml"))
+            zip.write("<Types/>".toByteArray())
+            zip.closeEntry()
+            zip.putNextEntry(java.util.zip.ZipEntry("word/document.xml"))
+            zip.write("<document/>".toByteArray())
+            zip.closeEntry()
+        }
+        val docx = bytes.toByteArray()
+        docx.toList().chunked(11).forEach { carver.consume(it.toByteArray()) }
+        carver.finish()
+        assertEquals(1, results.size)
+        assertEquals("docx", results.single().kind)
+        assertEquals(true, results.single().complete)
+        assertArrayEquals(docx, File(results.single().path).readBytes())
     }
 
     @Test

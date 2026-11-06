@@ -63,6 +63,8 @@ class UsbMassStorage(context: Context, private val device: UsbDevice) : Closeabl
                 return Capacity((lastLba + 1) * block, block)
             } catch (error: IOException) {
                 lastError = error
+                input?.let { connection?.clearHalt(it) }
+                output?.let { connection?.clearHalt(it) }
                 try { command(ByteArray(10), 0) } catch (_: Exception) {}
                 Thread.sleep(250)
             }
@@ -108,8 +110,13 @@ class UsbMassStorage(context: Context, private val device: UsbDevice) : Closeabl
         } else ByteArray(0)
         val csw = ByteArray(13)
         transferAll(input, csw, 5000, true)
-        val signature = ByteBuffer.wrap(csw, 0, 4).order(ByteOrder.LITTLE_ENDIAN).int
+        val response = ByteBuffer.wrap(csw).order(ByteOrder.LITTLE_ENDIAN)
+        val signature = response.int
+        val responseTag = response.int
+        val residue = response.int
         if (signature != 0x53425355) throw IOException("Invalid USB CSW signature")
+        if (responseTag != commandTag) throw IOException("Mismatched USB command response")
+        if (residue != 0) throw IOException("USB command left $residue unread bytes")
         if (csw[12].toInt() != 0) throw IOException("SCSI command failed with status ${csw[12]}")
         return data
     }

@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
 import androidx.activity.result.ActivityResult
+import androidx.documentfile.provider.DocumentFile
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -196,6 +197,76 @@ class OtgRecoveryPlugin : Plugin() {
         call.resolve(JSObject().put("files", array))
     }
 
+    @PluginMethod
+    fun exportRecoveredFiles(call: PluginCall) {
+        if (!ensureIdle(call)) return
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        startActivityForResult(call, intent, "exportDestinationResult")
+    }
+
+    @ActivityCallback
+    private fun exportDestinationResult(call: PluginCall, result: ActivityResult) {
+        val uri = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || uri == null) {
+            call.reject("Export cancelled")
+            return
+        }
+        persistPermission(uri, true)
+        call.resolve(JSObject().put("started", true))
+        busy.set(true)
+        stopRequested.set(false)
+        executor.execute { runExport(uri) }
+    }
+
+    private fun runExport(destination: Uri) {
+        var exported = 0
+        var skipped = 0
+        var message = ""
+        try {
+            val tree = DocumentFile.fromTreeUri(context, destination)
+                ?: throw IOException("Could not open export folder")
+            val sources = outputRoot().walkTopDown().filter { it.isFile }.toList()
+            if (sources.isEmpty()) throw IOException("No recovered files to export")
+            for (source in sources) {
+                if (stopRequested.get()) break
+                val existing = tree.findFile(source.name)
+                if (existing != null && existing.length() == source.length()) {
+                    skipped++
+                    continue
+                }
+                existing?.delete()
+                val target = tree.createFile(mimeFor(source.extension), source.name)
+                    ?: throw IOException("Could not create ${source.name}")
+                context.contentResolver.openOutputStream(target.uri, "w")?.use { output ->
+                    source.inputStream().buffered().use { input -> input.copyTo(output) }
+                } ?: throw IOException("Could not write ${source.name}")
+                if (target.length() != source.length()) throw IOException("Export size verification failed for ${source.name}")
+                exported++
+            }
+            message = "Export complete · $exported copied, $skipped already present"
+        } catch (error: Exception) {
+            message = "Export failed: ${error.message ?: error.javaClass.simpleName}"
+        } finally {
+            busy.set(false)
+            val event = JSObject()
+            event.put("exported", exported)
+            event.put("skipped", skipped)
+            event.put("message", message)
+            notifyListeners("exportComplete", event)
+        }
+    }
+
+    private fun mimeFor(extension: String): String = when (extension.lowercase()) {
+        "jpg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "pdf" -> "application/pdf"
+        "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        else -> "application/octet-stream"
+    }
+
     private fun runImaging(deviceId: Int, destination: Uri, resume: Boolean) {
         var reader: UsbMassStorage? = null
         var bytesWritten = 0L
@@ -204,10 +275,12 @@ class OtgRecoveryPlugin : Plugin() {
         var hash = ""
         var complete = false
         var message = ""
+        var sourceDevice: UsbDevice? = null
         val preferences = context.getSharedPreferences("acquisitions", Context.MODE_PRIVATE)
         val metadataKey = "image_${destination}"
         try {
             val device = findDevice(deviceId) ?: throw IOException("USB drive disconnected")
+            sourceDevice = device
             reader = UsbMassStorage(context, device)
             val capacity = reader.open()
             total = capacity.bytes
@@ -229,6 +302,8 @@ class OtgRecoveryPlugin : Plugin() {
             } else {
                 preferences.edit().remove(metadataKey).apply()
             }
+            val acquisitionDigest = MessageDigest.getInstance("SHA-256")
+            if (resume && bytesWritten > 0) updateDigestFromUri(acquisitionDigest, destination)
             val descriptor = context.contentResolver.openFileDescriptor(destination, "rw")
                 ?: throw IOException("Could not open destination image")
             descriptor.use { pfd ->
@@ -240,6 +315,7 @@ class OtgRecoveryPlugin : Plugin() {
                         val length = minOf(512 * 1024L, total - bytesWritten).toInt()
                         val bytes = reader.read(bytesWritten, length, capacity)
                         output.write(bytes)
+                        acquisitionDigest.update(bytes)
                         bytesWritten += bytes.size
                         val now = System.currentTimeMillis()
                         if (now - lastProgress > 750 || bytesWritten == total) {
@@ -251,10 +327,12 @@ class OtgRecoveryPlugin : Plugin() {
                     fileOutput.fd.sync()
                 }
             }
-            cancelled = stopRequested.get()
+            cancelled = stopRequested.get() && bytesWritten < total
             complete = !cancelled && bytesWritten == total
             hash = sha256(destination)
             if (complete) {
+                val acquisitionHash = acquisitionDigest.digest().joinToString("") { "%02x".format(it) }
+                if (hash != acquisitionHash) throw IOException("Image verification mismatch; recovered image does not match acquired data")
                 preferences.edit().remove(metadataKey).apply()
                 message = "Image complete and SHA-256 verified"
             } else {
@@ -262,7 +340,16 @@ class OtgRecoveryPlugin : Plugin() {
                 message = "Image incomplete · verified resume is available"
             }
         } catch (error: Exception) {
+            complete = false
             message = "Imaging stopped: ${error.message ?: error.javaClass.simpleName}"
+            val source = sourceDevice
+            if (source != null && total > 0 && bytesWritten > 0 && bytesWritten < total) {
+                try {
+                    val partialHash = sha256(destination)
+                    saveResumeState(preferences, metadataKey, destination, source, total, bytesWritten, partialHash)
+                    message += " · Verified resume is available"
+                } catch (_: Exception) {}
+            }
         } finally {
             reader?.close()
             busy.set(false)
@@ -292,6 +379,11 @@ class OtgRecoveryPlugin : Plugin() {
 
     private fun sha256(uri: Uri): String {
         val digest = MessageDigest.getInstance("SHA-256")
+        updateDigestFromUri(digest, uri)
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun updateDigestFromUri(digest: MessageDigest, uri: Uri) {
         context.contentResolver.openInputStream(uri)?.use { input ->
             val buffer = ByteArray(1024 * 1024)
             while (true) {
@@ -300,7 +392,6 @@ class OtgRecoveryPlugin : Plugin() {
                 if (count > 0) digest.update(buffer, 0, count)
             }
         } ?: throw IOException("Could not verify destination image")
-        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun runDirectScan(device: UsbDevice) {
@@ -323,7 +414,9 @@ class OtgRecoveryPlugin : Plugin() {
             descriptor.use { asset ->
                 val total = asset.length
                 if (total <= 0) throw IOException("Selected file has no readable size")
-                FileInputStream(asset.fileDescriptor).buffered(1024 * 1024).use { input ->
+                val rawInput = FileInputStream(asset.fileDescriptor)
+                rawInput.channel.position(asset.startOffset)
+                rawInput.buffered(1024 * 1024).use { input ->
                     performCarving(total) { _, length ->
                         val data = ByteArray(length)
                         var offset = 0
@@ -364,7 +457,7 @@ class OtgRecoveryPlugin : Plugin() {
             }
         }
         carver.finish()
-        val cancelled = stopRequested.get()
+        val cancelled = stopRequested.get() && position < total
         completeScan(found, cancelled, if (cancelled) "Scan stopped · $found files recovered" else "Scan complete · $found files recovered")
     }
 
