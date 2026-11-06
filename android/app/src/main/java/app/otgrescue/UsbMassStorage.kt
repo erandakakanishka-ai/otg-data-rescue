@@ -63,8 +63,8 @@ class UsbMassStorage(context: Context, private val device: UsbDevice) : Closeabl
                 return Capacity((lastLba + 1) * block, block)
             } catch (error: IOException) {
                 lastError = error
-                input?.let { connection?.clearHalt(it) }
-                output?.let { connection?.clearHalt(it) }
+                input?.let { clearHalt(it) }
+                output?.let { clearHalt(it) }
                 try { command(ByteArray(10), 0) } catch (_: Exception) {}
                 Thread.sleep(250)
             }
@@ -135,6 +135,11 @@ class UsbMassStorage(context: Context, private val device: UsbDevice) : Closeabl
                 offset += result
             }
         }
+    }
+
+    private fun clearHalt(endpoint: UsbEndpoint) {
+        // USB CLEAR_FEATURE(ENDPOINT_HALT), recipient = endpoint.
+        connection?.controlTransfer(0x02, 0x01, 0, endpoint.address, null, 0, 1000)
     }
 
     override fun close() {
