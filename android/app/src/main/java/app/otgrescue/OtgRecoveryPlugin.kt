@@ -11,6 +11,7 @@ import android.hardware.usb.UsbManager
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import androidx.activity.result.ActivityResult
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
@@ -30,7 +31,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 @CapacitorPlugin(name = "OtgRecovery")
-class OtgRecoveryPlugin : Plugin {
+class OtgRecoveryPlugin : Plugin() {
     private val executor = Executors.newSingleThreadExecutor()
     private val busy = AtomicBoolean(false)
     private val stopRequested = AtomicBoolean(false)
@@ -99,7 +100,7 @@ class OtgRecoveryPlugin : Plugin {
     }
 
     @ActivityCallback
-    private fun imageDestinationResult(call: PluginCall, result: com.getcapacitor.ActivityResult) {
+    private fun imageDestinationResult(call: PluginCall, result: ActivityResult) {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
             call.reject("Image creation cancelled")
@@ -128,7 +129,7 @@ class OtgRecoveryPlugin : Plugin {
     }
 
     @ActivityCallback
-    private fun resumeDestinationResult(call: PluginCall, result: com.getcapacitor.ActivityResult) {
+    private fun resumeDestinationResult(call: PluginCall, result: ActivityResult) {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
             call.reject("Resume cancelled")
@@ -153,7 +154,7 @@ class OtgRecoveryPlugin : Plugin {
     }
 
     @ActivityCallback
-    private fun imageSourceResult(call: PluginCall, result: com.getcapacitor.ActivityResult) {
+    private fun imageSourceResult(call: PluginCall, result: ActivityResult) {
         val uri = result.data?.data
         if (result.resultCode != Activity.RESULT_OK || uri == null) {
             call.reject("No disk image selected")
@@ -202,7 +203,7 @@ class OtgRecoveryPlugin : Plugin {
         var cancelled = false
         var hash = ""
         var complete = false
-        var message: String
+        var message = ""
         val preferences = context.getSharedPreferences("acquisitions", Context.MODE_PRIVATE)
         val metadataKey = "image_${destination}"
         try {
