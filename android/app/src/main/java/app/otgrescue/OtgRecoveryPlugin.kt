@@ -229,7 +229,7 @@ class OtgRecoveryPlugin : Plugin() {
             } else {
                 preferences.edit().remove(metadataKey).apply()
             }
-            val descriptor = context.contentResolver.openParcelFileDescriptor(destination, "rw")
+            val descriptor = context.contentResolver.openFileDescriptor(destination, "rw")
                 ?: throw IOException("Could not open destination image")
             descriptor.use { pfd ->
                 FileOutputStream(pfd.fileDescriptor).use { fileOutput ->
