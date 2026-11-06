@@ -18,7 +18,8 @@ class FileCarver(private val outputDirectory: File, private val onFile: (CarvedF
         val extension: String,
         val header: ByteArray,
         val footer: ByteArray?,
-        val maxBytes: Long
+        val maxBytes: Long,
+        val afterFooter: Int = 0
     )
     private class Active(
         val signature: Signature,
@@ -33,7 +34,7 @@ class FileCarver(private val outputDirectory: File, private val onFile: (CarvedF
         Signature("png", "png", byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a), byteArrayOf(0x49, 0x45, 0x4e, 0x44, 0xae.toByte(), 0x42, 0x60, 0x82.toByte()), 64L * 1024 * 1024),
         Signature("gif", "gif", "GIF8".toByteArray(), byteArrayOf(0x00, 0x3b), 32L * 1024 * 1024),
         Signature("pdf", "pdf", "%PDF-".toByteArray(), "%%EOF".toByteArray(), 128L * 1024 * 1024),
-        Signature("zip", "zip", byteArrayOf(0x50, 0x4b, 0x03, 0x04), byteArrayOf(0x50, 0x4b, 0x05, 0x06), 256L * 1024 * 1024)
+        Signature("zip", "zip", byteArrayOf(0x50, 0x4b, 0x03, 0x04), byteArrayOf(0x50, 0x4b, 0x05, 0x06), 256L * 1024 * 1024, 18)
     )
     private var active: Active? = null
     private var carry = ByteArray(0)
@@ -50,8 +51,8 @@ class FileCarver(private val outputDirectory: File, private val onFile: (CarvedF
                 val remaining = data.copyOfRange(position, data.size)
                 val search = current.tail + remaining
                 val match = indexOf(search, footer, 0)
-                if (match >= 0) {
-                    val fromNewData = match + footer.size - current.tail.size
+                if (match >= 0 && match + footer.size + current.signature.afterFooter <= search.size) {
+                    val fromNewData = match + footer.size + current.signature.afterFooter - current.tail.size
                     if (fromNewData > 0) write(current, remaining, 0, minOf(fromNewData, remaining.size))
                     close(true)
                     position += maxOf(0, fromNewData)
@@ -59,7 +60,7 @@ class FileCarver(private val outputDirectory: File, private val onFile: (CarvedF
                     continue
                 }
                 write(current, remaining, 0, remaining.size)
-                current.tail = search.takeLast(maxOf(footer.size - 1, 0)).toByteArray()
+                current.tail = search.takeLast(maxOf(footer.size + current.signature.afterFooter, 1)).toByteArray()
                 position = data.size
                 if (current.size >= current.signature.maxBytes) close(false)
             } else {
@@ -81,9 +82,15 @@ class FileCarver(private val outputDirectory: File, private val onFile: (CarvedF
                 val inRemaining = bestIndex - carry.size
                 val file = File(outputDirectory, "recovered_${String.format("%04d", ++sequence)}.${bestSignature.extension}")
                 val stream = FileOutputStream(file)
-                active = Active(bestSignature, file, stream)
-                val start = maxOf(0, inRemaining)
-                position += start
+                val newActive = Active(bestSignature, file, stream)
+                active = newActive
+                if (inRemaining < 0) {
+                    val prefix = carry.copyOfRange(bestIndex, carry.size)
+                    write(newActive, prefix, 0, prefix.size)
+                    newActive.tail = prefix
+                } else {
+                    position += inRemaining
+                }
                 carry = ByteArray(0)
             }
         }

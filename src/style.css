@@ -19,6 +19,7 @@ h1 { margin: 0; font-size: clamp(28px, 7vw, 42px); line-height: 1.05; letter-spa
 .notice { display: flex; flex-direction: column; gap: 3px; padding: 14px 16px; border: 1px solid #72522a; border-radius: 14px; background: #2d2114; color: #f6d9a5; font-size: 13px; line-height: 1.45; }
 .notice strong { color: #ffd48c; }
 .card { margin-top: 16px; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: #101d19dd; box-shadow: 0 18px 50px #0002; }
+.card.recommended { border-color: #3d7358; background: linear-gradient(145deg, #142a20ee, #101d19dd); }
 .step-title { display: flex; align-items: center; gap: 10px; }
 .step-title > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 8px; background: #203e31; color: var(--green); font-size: 13px; font-weight: 800; }
 h2 { margin: 0; font-size: 17px; letter-spacing: -.02em; }

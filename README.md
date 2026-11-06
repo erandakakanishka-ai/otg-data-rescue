@@ -9,7 +9,11 @@ An **experimental, read-only Android recovery prototype** for USB flash drives c
 - Detects Android USB mass-storage devices without root.
 - Requests Android USB permission and submits standard SCSI commands.
 - Reads source sectors sequentially without issuing write commands.
-- Carves common contiguous JPG, PNG, GIF, PDF, ZIP-based, and MP4 files.
+- Creates a full raw `.img` acquisition on user-selected separate storage.
+- Calculates SHA-256 and verifies the completed image before reporting success.
+- Supports verified resume after a normal cancellation by checking source identity, capacity, image length, and the partial image checksum.
+- Recovers from either an existing image or a directly connected source drive.
+- Carves common contiguous JPG, PNG, GIF, PDF, and ZIP-based files.
 - Saves recovered output to app-private storage, never to the source drive.
 - Builds a debug APK through GitHub Actions.
 

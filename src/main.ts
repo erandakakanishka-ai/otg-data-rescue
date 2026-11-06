@@ -33,19 +33,32 @@ app.innerHTML = `
       <p id="drive-status" class="status">Waiting for a USB mass-storage device…</p>
     </section>
 
-    <section class="card">
-      <div class="step-title"><span>2</span><h2>Scan for deleted files</h2></div>
-      <p class="muted">Signatures currently targeted: JPG, PNG, GIF, PDF, ZIP/DOCX and MP4. A full scan can take a long time.</p>
+    <section class="card recommended">
+      <div class="step-title"><span>2</span><h2>Create a safety image</h2><b>RECOMMENDED</b></div>
+      <p class="muted">Copy the entire drive to an <strong>.img</strong> file on separate storage. The app calculates and verifies SHA-256. You need free space equal to the drive's capacity.</p>
       <div class="actions">
-        <button id="scan" disabled>Start read-only scan</button>
-        <button id="stop" class="danger" disabled>Stop</button>
+        <button id="image" disabled>Create disk image</button>
+        <button id="resume-image" class="secondary" disabled>Resume</button>
+        <button id="scan-image" class="secondary">Recover from image</button>
+      </div>
+      <div class="progress-track"><div id="image-progress" class="progress-bar"></div></div>
+      <div class="progress-meta"><span id="image-label">No image created in this session</span><span id="image-percent">0%</span></div>
+      <p id="image-hash" class="output-path"></p>
+    </section>
+
+    <section class="card">
+      <div class="step-title"><span>3</span><h2>Scan for deleted files</h2></div>
+      <p class="muted">Choose an image above for the safest workflow, or directly scan the connected drive. Signatures currently targeted: JPG, PNG, GIF, PDF and ZIP-based files.</p>
+      <div class="actions">
+        <button id="scan" disabled>Direct scan</button>
+        <button id="stop" class="danger" disabled>Stop operation</button>
       </div>
       <div class="progress-track"><div id="progress" class="progress-bar"></div></div>
       <div class="progress-meta"><span id="progress-label">Not scanned</span><span id="percent">0%</span></div>
     </section>
 
     <section class="card results-card">
-      <div class="step-title"><span>3</span><h2>Recovered files</h2><b id="count">0</b></div>
+      <div class="step-title"><span>4</span><h2>Recovered files</h2><b id="count">0</b></div>
       <div id="results" class="results"><p class="empty">Recovered files will appear here.</p></div>
       <p id="output-path" class="output-path"></p>
     </section>
@@ -60,6 +73,9 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const drivesSelect = $<HTMLSelectElement>('drives');
 const connectButton = $<HTMLButtonElement>('connect');
 const scanButton = $<HTMLButtonElement>('scan');
+const imageButton = $<HTMLButtonElement>('image');
+const resumeImageButton = $<HTMLButtonElement>('resume-image');
+const scanImageButton = $<HTMLButtonElement>('scan-image');
 const stopButton = $<HTMLButtonElement>('stop');
 let drives: UsbDrive[] = [];
 let connectedId: number | null = null;
@@ -118,9 +134,68 @@ connectButton.addEventListener('click', async () => {
     await OtgRecovery.connect({ deviceId });
     connectedId = deviceId;
     scanButton.disabled = false;
+    imageButton.disabled = false;
+    resumeImageButton.disabled = false;
     setStatus('Drive connected. The source will be opened read-only.');
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), true);
+  }
+});
+
+imageButton.addEventListener('click', async () => {
+  if (connectedId === null) return;
+  try {
+    imageButton.disabled = true;
+    scanImageButton.disabled = true;
+    scanButton.disabled = true;
+    stopButton.disabled = false;
+    $('image-label').textContent = 'Choose a destination on separate storage…';
+    await OtgRecovery.createImage({ deviceId: connectedId });
+  } catch (error) {
+    $('image-label').textContent = error instanceof Error ? error.message : String(error);
+    imageButton.disabled = false;
+    scanImageButton.disabled = false;
+    scanButton.disabled = false;
+    stopButton.disabled = true;
+  }
+});
+
+resumeImageButton.addEventListener('click', async () => {
+  if (connectedId === null) return;
+  try {
+    imageButton.disabled = true;
+    resumeImageButton.disabled = true;
+    scanImageButton.disabled = true;
+    scanButton.disabled = true;
+    stopButton.disabled = false;
+    $('image-label').textContent = 'Select the matching partial image. Its checksum will be verified…';
+    await OtgRecovery.resumeImage({ deviceId: connectedId });
+  } catch (error) {
+    $('image-label').textContent = error instanceof Error ? error.message : String(error);
+    imageButton.disabled = false;
+    resumeImageButton.disabled = false;
+    scanImageButton.disabled = false;
+    scanButton.disabled = false;
+    stopButton.disabled = true;
+  }
+});
+
+scanImageButton.addEventListener('click', async () => {
+  try {
+    files = [];
+    $('results').innerHTML = '<p class="empty">Select a raw .img file to scan…</p>';
+    $('count').textContent = '0';
+    imageButton.disabled = true;
+    scanImageButton.disabled = true;
+    scanButton.disabled = true;
+    stopButton.disabled = false;
+    await OtgRecovery.scanImage();
+  } catch (error) {
+    $('progress-label').textContent = error instanceof Error ? error.message : String(error);
+    imageButton.disabled = connectedId === null;
+    scanImageButton.disabled = false;
+    scanButton.disabled = connectedId === null;
+    stopButton.disabled = true;
   }
 });
 
@@ -153,9 +228,28 @@ OtgRecovery.addListener('scanProgress', (progress) => {
   $('progress-label').textContent = `${formatBytes(progress.bytesScanned)} of ${formatBytes(progress.totalBytes)} · ${progress.filesFound} found`;
 });
 
+OtgRecovery.addListener('imageProgress', (progress) => {
+  $('image-progress').style.width = `${progress.percent}%`;
+  $('image-percent').textContent = `${progress.percent.toFixed(1)}%`;
+  $('image-label').textContent = `${formatBytes(progress.bytesWritten)} of ${formatBytes(progress.totalBytes)} acquired`;
+});
+
+OtgRecovery.addListener('imageComplete', (result) => {
+  imageButton.disabled = connectedId === null;
+  resumeImageButton.disabled = connectedId === null || result.complete;
+  scanImageButton.disabled = false;
+  scanButton.disabled = connectedId === null;
+  stopButton.disabled = true;
+  $('image-label').textContent = result.message;
+  if (result.complete) $('image-progress').style.width = '100%';
+  $('image-hash').textContent = result.sha256 ? `SHA-256: ${result.sha256}` : 'The image is incomplete; do not treat it as a verified acquisition.';
+});
+
 OtgRecovery.addListener('fileRecovered', addFile);
 OtgRecovery.addListener('scanComplete', (result) => {
-  scanButton.disabled = false;
+  scanButton.disabled = connectedId === null;
+  imageButton.disabled = connectedId === null;
+  scanImageButton.disabled = false;
   connectButton.disabled = false;
   stopButton.disabled = true;
   $('progress-label').textContent = result.message;
