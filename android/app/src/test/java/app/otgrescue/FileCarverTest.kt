@@ -36,7 +36,7 @@ class FileCarverTest {
         zip.toList().chunked(7).forEach { carver.consume(it.toByteArray()) }
         carver.finish()
         assertEquals(1, results.size)
-        assertEquals(false, results.single().complete)
+        assertEquals(true, results.single().complete)
         assertArrayEquals(zip, File(results.single().path).readBytes())
     }
 
